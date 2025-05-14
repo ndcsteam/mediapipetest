@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaPipe Hand Tracking Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1651854615"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                    },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <h1 class="text-3xl font-bold text-center mb-2 text-primary">MediaPipe Hand Catcher Game</h1>
+        <p class="text-center mb-6">Use your hand to catch the falling objects!</p>
+        
+        <div class="relative mx-auto w-full max-w-2xl aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <!-- Game canvas -->
+            <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full z-10"></canvas>
+            
+            <!-- Camera feed (hidden, but used for processing) -->
+            <video id="webcam" class="absolute top-0 left-0 w-full h-full opacity-0" playsinline></video>
+            
+            <!-- Game elements -->
+            <div id="game-container" class="absolute top-0 left-0 w-full h-full z-20">
+                <div id="hand-cursor" class="absolute w-16 h-16 rounded-full border-4 border-primary opacity-70 transform -translate-x-1/2 -translate-y-1/2 hidden pointer-events-none"></div>
+            </div>
+            
+            <!-- Score display -->
+            <div id="score-display" class="absolute top-4 right-4 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-md z-30">
+                <p class="font-bold">Score: <span id="score">0</span></p>
+            </div>
+            
+            <!-- Game state overlays -->
+            <div id="loading-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40">
+                <div class="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p class="text-lg font-medium">Loading MediaPipe...</p>
+                <p class="text-sm mt-2">This game requires camera access to track your hand.</p>
+            </div>
+            
+            <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <h2 class="text-2xl font-bold mb-4">Hand Catcher Game</h2>
+                <p class="mb-6 text-center max-w-md">Move your hand in front of the camera to catch the falling objects.</p>
+                <button id="start-button" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors text-lg font-medium">Start Game</button>
+            </div>
+            
+            <div id="permission-error" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <div class="text-red-500 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">Camera Access Required</h2>
+                <p class="text-center max-w-md mb-6">This game needs access to your camera to track your hand movements. Please allow camera access and reload the page.</p>
+                <button onclick="location.reload()" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors">Try Again</button>
+            </div>
+            
+            <div id="game-over" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <h2 class="text-2xl font-bold mb-2">Game Over!</h2>
+                <p class="mb-2">Your score: <span id="final-score" class="font-bold text-xl">0</span></p>
+                <button id="restart-button" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors mt-4">Play Again</button>
+            </div>
+        </div>
+        
+        <div class="mt-6 text-center">
+            <p class="text-sm opacity-80">This game uses MediaPipe's hand tracking to detect your hand position.</p>
+            <p class="text-sm opacity-80 mt-1">Make sure you're in a well-lit environment for best tracking results.</p>
+        </div>
+    </div>
+
+    <script>
+        // Set up dark mode detection
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        // Game elements
+        const loadingScreen = document.getElementById('loading-screen');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over');
+        const permissionError = document.getElementById('permission-error');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const scoreDisplay = document.getElementById('score');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const handCursor = document.getElementById('hand-cursor');
+        const gameContainer = document.getElementById('game-container');
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        // Game state
+        let handLandmarker = null;
+        let gameRunning = false;
+        let score = 0;
+        let lastVideoTime = -1;
+        let fallingObjects = [];
+        let handPosition = { x: 0, y: 0 };
+        let handPresent = false;
+        let gameSpeed = 1;
+        let lastFrameTime = 0;
+        let gameTime = 0;
+        
+        // Game settings
+        const gameDuration = 60; // in seconds
+        const objectFrequency = 1.5; // new object every X seconds
+        const objectFallSpeed = 200; // pixels per second
+        const objectSize = 40;
+        const catchDistance = 50; // distance for catching objects
+        
+        // Start loading MediaPipe
+        async function setupMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+                );
+                
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+                
+                // Show start screen once loaded
+                loadingScreen.classList.add('hidden');
+                startScreen.classList.remove('hidden');
+            } catch (error) {
+                console.error("Error loading MediaPipe:", error);
+                loadingScreen.classList.add('hidden');
+                permissionError.classList.remove('hidden');
+            }
+        }
+        
+        // Try to setup camera access
+        async function setupCamera() {
+            try {
+                const constraints = { video: { width: 1280, height: 720 } };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        resolve(videoElement);
+                    };
+                });
+            } catch (error) {
+                console.error("Error accessing camera:", error);
+                loadingScreen.classList.add('hidden');
+                permissionError.classList.remove('hidden');
+                throw error;
+            }
+        }
+        
+        // Start the game
+        async function startGame() {
+            try {
+                await setupCamera();
+                startScreen.classList.add('hidden');
+                
+                // Reset game state
+                score = 0;
+                scoreDisplay.textContent = score;
+                fallingObjects = [];
+                gameTime = 0;
+                gameSpeed = 1;
+                gameRunning = true;
+                
+                // Set canvas dimensions
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+                
+                // Start game loop
+                lastFrameTime = performance.now();
+                requestAnimationFrame(gameLoop);
+            } catch (error) {
+                console.error("Error starting game:", error);
+            }
+        }
+        
+        // Create a falling object
+        function createFallingObject() {
+            const colors = [
+                'bg-red-500', 'bg-blue-500', 'bg-green-500', 
+                'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'
+            ];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            
+            const object = document.createElement('div');
+            object.className = `absolute rounded-full ${randomColor} shadow-md`;
+            object.style.width = `${objectSize}px`;
+            object.style.height = `${objectSize}px`;
+            object.style.left = `${Math.random() * (gameContainer.clientWidth - objectSize)}px`;
+            object.style.top = `${-objectSize}px`;
+            
+            gameContainer.appendChild(object);
+            
+            fallingObjects.push({
+                element: object,
+                y: -objectSize,
+                x: parseFloat(object.style.left),
+                caught: false
+            });
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+            
+            // Calculate time delta
+            const deltaTime = (timestamp - lastFrameTime) / 1000;
+            lastFrameTime = timestamp;
+            
+            // Update game time
+            gameTime += deltaTime;
+            
+            // Create new objects
+            if (gameTime % (objectFrequency / gameSpeed) < deltaTime) {
+                createFallingObject();
+            }
+            
+            // Increase game speed over time
+            gameSpeed = 1 + (gameTime / 30) * 0.5;
+            
+            // Process hand detection
+            detectHands();
+            
+            // Update falling objects
+            updateObjects(deltaTime);
+            
+            // Check for game over condition
+            if (gameTime >= gameDuration) {
+                endGame();
+                return;
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Detect hands using MediaPipe
+        function detectHands() {
+            if (!handLandmarker || videoElement.currentTime === lastVideoTime) {
+                return;
+            }
+            
+            lastVideoTime = videoElement.currentTime;
+            
+            const results = handLandmarker.detectForVideo(videoElement, performance.now());
+            
+            // Clear canvas
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            if (results.landmarks.length > 0) {
+                // Get palm position (average of specific landmarks)
+                const landmarks = results.landmarks[0];
+                
+                // Use the index finger tip (landmark 8) for control
+                const indexTip = landmarks[8];
+                
+                // Convert to screen coordinates
+                handPosition = {
+                    x: indexTip.x * canvasElement.width,
+                    y: indexTip.y * canvasElement.height
+                };
+                
+                handPresent = true;
+                handCursor.style.left = `${handPosition.x}px`;
+                handCursor.style.top = `${handPosition.y}px`;
+                handCursor.classList.remove('hidden');
+                
+                // Draw hand landmarks for visual feedback
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+                    color: '#5D5CDE',
+                    lineWidth: 3
+                });
+                drawLandmarks(canvasCtx, landmarks, {
+                    color: '#FFFFFF',
+                    lineWidth: 1,
+                    radius: 3
+                });
+            } else {
+                handPresent = false;
+                handCursor.classList.add('hidden');
+            }
+        }
+        
+        // Update falling objects
+        function updateObjects(deltaTime) {
+            fallingObjects.forEach((object, index) => {
+                // Update position
+                object.y += objectFallSpeed * gameSpeed * deltaTime;
+                object.element.style.top = `${object.y}px`;
+                
+                // Check if hand catches the object
+                if (handPresent && !object.caught) {
+                    const distance = Math.hypot(
+                        handPosition.x - (object.x + objectSize/2),
+                        handPosition.y - (object.y + objectSize/2)
+                    );
+                    
+                    if (distance < catchDistance) {
+                        // Caught object!
+                        object.caught = true;
+                        object.element.classList.add('scale-0', 'opacity-0', 'transition-all', 'duration-300');
+                        score += 10;
+                        scoreDisplay.textContent = score;
+                        
+                        // Create particle effect
+                        createCatchParticles(object.x + objectSize/2, object.y + objectSize/2);
+                        
+                        // Remove after animation
+                        setTimeout(() => {
+                            if (object.element.parentNode) {
+                                object.element.parentNode.removeChild(object.element);
+                            }
+                            fallingObjects.splice(index, 1);
+                        }, 300);
+                    }
+                }
+                
+                // Remove if out of bounds
+                if (object.y > gameContainer.clientHeight) {
+                    if (object.element.parentNode) {
+                        object.element.parentNode.removeChild(object.element);
+                    }
+                    fallingObjects.splice(index, 1);
+                }
+            });
+        }
+        
+        // Create particle effect when catching objects
+        function createCatchParticles(x, y) {
+            const colors = ['bg-yellow-400', 'bg-white', 'bg-primary', 'bg-yellow-200'];
+            const particleCount = 8;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = `absolute ${colors[i % colors.length]} rounded-full opacity-80`;
+                
+                const size = Math.random() * 8 + 4;
+                particle.style.width = `${size}px`;
+                particle.style.height = `${size}px`;
+                particle.style.left = `${x}px`;
+                particle.style.top = `${y}px`;
+                
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 100 + 50;
+                const vx = Math.cos(angle) * speed;
+                const vy = Math.sin(angle) * speed;
+                
+                gameContainer.appendChild(particle);
+                
+                // Animate particles
+                let particleTime = 0;
+                const animateParticle = (timestamp) => {
+                    if (!particle.parentNode) return;
+                    
+                    particleTime += 1/60;
+                    
+                    const newX = x + vx * particleTime;
+                    const newY = y + vy * particleTime + (50 * particleTime * particleTime);
+                    
+                    particle.style.left = `${newX}px`;
+                    particle.style.top = `${newY}px`;
+                    particle.style.opacity = `${1 - particleTime * 2}`;
+                    
+                    if (particleTime < 0.5) {
+                        requestAnimationFrame(animateParticle);
+                    } else {
+                        particle.parentNode.removeChild(particle);
+                    }
+                };
+                
+                requestAnimationFrame(animateParticle);
+            }
+        }
+        
+        // End the game
+        function endGame() {
+            gameRunning = false;
+            
+            // Remove falling objects
+            fallingObjects.forEach(object => {
+                if (object.element.parentNode) {
+                    object.element.parentNode.removeChild(object.element);
+                }
+            });
+            fallingObjects = [];
+            
+            // Update final score
+            finalScoreDisplay.textContent = score;
+            
+            // Show game over screen
+            gameOverScreen.classList.remove('hidden');
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            startGame();
+        });
+        
+        // Start loading MediaPipe on page load
+        window.addEventListener('load', setupMediaPipe);
+    </script>
+</body>
+</html>
