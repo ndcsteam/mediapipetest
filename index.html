@@ -28,14 +28,14 @@
         <p class="text-center mb-6">Use your hand to catch the falling objects!</p>
         
         <div class="relative mx-auto w-full max-w-2xl aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-            <!-- Game canvas -->
-            <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full z-10"></canvas>
+            <!-- Camera feed (visible as mirror) -->
+            <video id="webcam" class="absolute top-0 left-0 w-full h-full" playsinline style="transform: scaleX(-1);"></video>
             
-            <!-- Camera feed (hidden, but used for processing) -->
-            <video id="webcam" class="absolute top-0 left-0 w-full h-full opacity-0" playsinline></video>
+            <!-- Game canvas for hand landmarks -->
+            <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full z-10" style="transform: scaleX(-1);"></canvas>
             
-            <!-- Game elements -->
-            <div id="game-container" class="absolute top-0 left-0 w-full h-full z-20">
+            <!-- Game elements (also mirrored) -->
+            <div id="game-container" class="absolute top-0 left-0 w-full h-full z-20" style="transform: scaleX(-1);">
                 <div id="hand-cursor" class="absolute w-16 h-16 rounded-full border-4 border-primary opacity-70 transform -translate-x-1/2 -translate-y-1/2 hidden pointer-events-none"></div>
             </div>
             
