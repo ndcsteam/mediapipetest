@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MediaPipe Hand Tracking Game</title>
+    <title>Body Mover - MediaPipe Pose Game</title>
     <!-- MediaPipe dependencies -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -16,44 +15,72 @@
                 extend: {
                     colors: {
                         primary: '#5D5CDE',
+                        star: '#FFDE59',
+                        obstacle: '#FF5757'
                     },
                 }
             }
         }
     </script>
+    <style>
+        @keyframes twinkle {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        .star {
+            animation: twinkle 1.5s infinite;
+        }
+        .obstacle {
+            clip-path: polygon(50% 0%, 80% 30%, 100% 50%, 80% 70%, 50% 100%, 20% 70%, 0% 50%, 20% 30%);
+        }
+    </style>
 </head>
 <body class="bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300 min-h-screen">
     <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <h1 class="text-3xl font-bold text-center mb-2 text-primary">MediaPipe Hand Catcher Game</h1>
-        <p class="text-center mb-6">Use your hand to catch the falling objects!</p>
+        <h1 class="text-3xl font-bold text-center mb-2 text-primary">Body Mover</h1>
+        <p class="text-center mb-6">Move your body to collect stars and avoid obstacles!</p>
         
         <div class="relative mx-auto w-full max-w-2xl aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-            <!-- Camera feed (visible as mirror) -->
+            <!-- Camera feed (mirrored) -->
             <video id="webcam" class="absolute top-0 left-0 w-full h-full" playsinline style="transform: scaleX(-1);"></video>
             
-            <!-- Game canvas for hand landmarks -->
+            <!-- Game canvas for pose landmarks -->
             <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full z-10" style="transform: scaleX(-1);"></canvas>
             
             <!-- Game elements (also mirrored) -->
             <div id="game-container" class="absolute top-0 left-0 w-full h-full z-20" style="transform: scaleX(-1);">
-                <div id="hand-cursor" class="absolute w-16 h-16 rounded-full border-4 border-primary opacity-70 transform -translate-x-1/2 -translate-y-1/2 hidden pointer-events-none"></div>
+                <!-- Game objects will be created here -->
             </div>
             
-            <!-- Score display -->
-            <div id="score-display" class="absolute top-4 right-4 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-md z-30">
+            <!-- Game stats display -->
+            <div id="stats-display" class="absolute top-4 right-4 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-md z-30 flex flex-col">
                 <p class="font-bold">Score: <span id="score">0</span></p>
+                <p class="text-sm">Time: <span id="time">60</span>s</p>
+                <p class="text-sm flex items-center">
+                    <span class="inline-block w-3 h-3 bg-star rounded-full mr-1"></span> +10 points
+                </p>
+                <p class="text-sm flex items-center">
+                    <span class="inline-block w-3 h-3 bg-obstacle mr-1"></span> -5 points
+                </p>
             </div>
             
             <!-- Game state overlays -->
             <div id="loading-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40">
                 <div class="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
                 <p class="text-lg font-medium">Loading MediaPipe...</p>
-                <p class="text-sm mt-2">This game requires camera access to track your hand.</p>
+                <p class="text-sm mt-2">This game requires camera access to track your body.</p>
             </div>
             
             <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
-                <h2 class="text-2xl font-bold mb-4">Hand Catcher Game</h2>
-                <p class="mb-6 text-center max-w-md">Move your hand in front of the camera to catch the falling objects.</p>
+                <h2 class="text-2xl font-bold mb-2">Body Mover</h2>
+                <div class="max-w-md p-4 mb-4">
+                    <p class="mb-2 text-center">Move your body to interact with falling objects:</p>
+                    <ul class="list-disc pl-5 mb-4">
+                        <li>Collect stars (<span class="text-star">★</span>) with any part of your body for +10 points</li>
+                        <li>Avoid spiky obstacles (<span class="text-obstacle">✸</span>) or lose 5 points</li>
+                        <li>Stay in frame so the camera can see you</li>
+                    </ul>
+                </div>
                 <button id="start-button" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors text-lg font-medium">Start Game</button>
             </div>
             
@@ -64,7 +91,7 @@
                     </svg>
                 </div>
                 <h2 class="text-2xl font-bold mb-2">Camera Access Required</h2>
-                <p class="text-center max-w-md mb-6">This game needs access to your camera to track your hand movements. Please allow camera access and reload the page.</p>
+                <p class="text-center max-w-md mb-6">This game needs access to your camera to track your body movements. Please allow camera access and reload the page.</p>
                 <button onclick="location.reload()" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors">Try Again</button>
             </div>
             
@@ -76,8 +103,8 @@
         </div>
         
         <div class="mt-6 text-center">
-            <p class="text-sm opacity-80">This game uses MediaPipe's hand tracking to detect your hand position.</p>
-            <p class="text-sm opacity-80 mt-1">Make sure you're in a well-lit environment for best tracking results.</p>
+            <p class="text-sm opacity-80">This game uses MediaPipe's pose detection to track your body movements.</p>
+            <p class="text-sm opacity-80 mt-1">For best results, make sure your entire body is visible in the camera.</p>
         </div>
     </div>
 
@@ -102,88 +129,84 @@
         const startButton = document.getElementById('start-button');
         const restartButton = document.getElementById('restart-button');
         const scoreDisplay = document.getElementById('score');
+        const timeDisplay = document.getElementById('time');
         const finalScoreDisplay = document.getElementById('final-score');
-        const handCursor = document.getElementById('hand-cursor');
         const gameContainer = document.getElementById('game-container');
         const videoElement = document.getElementById('webcam');
         const canvasElement = document.getElementById('output-canvas');
         const canvasCtx = canvasElement.getContext('2d');
         
         // Game state
-        let handLandmarker = null;
+        let poseDetector = null;
         let gameRunning = false;
         let score = 0;
         let lastVideoTime = -1;
-        let fallingObjects = [];
-        let handPosition = { x: 0, y: 0 };
-        let handPresent = false;
-        let gameSpeed = 1;
+        let gameObjects = [];
+        let poseKeypoints = [];
+        let bodyPresent = false;
         let lastFrameTime = 0;
         let gameTime = 0;
+        let remainingTime = 60; // Game duration in seconds
         
         // Game settings
         const gameDuration = 60; // in seconds
-        const objectFrequency = 1.5; // new object every X seconds
-        const objectFallSpeed = 200; // pixels per second
-        const objectSize = 40;
-        const catchDistance = 50; // distance for catching objects
+        const starFrequency = 1.0; // new star every X seconds
+        const obstacleFrequency = 1.8; // new obstacle every X seconds
+        const objectFallSpeed = 150; // pixels per second
+        const starSize = 40;
+        const obstacleSize = 35;
+        const interactionDistance = 30; // Distance for collision detection
         
         // Start loading MediaPipe
         async function setupMediaPipe() {
             try {
-                // Initialize Hands detector
-                const hands = new Hands({
+                // Initialize Pose detection
+                const pose = new Pose({
                     locateFile: (file) => {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
                     }
                 });
                 
-                hands.setOptions({
-                    maxNumHands: 1,
+                pose.setOptions({
                     modelComplexity: 1,
+                    smoothLandmarks: true,
                     minDetectionConfidence: 0.5,
                     minTrackingConfidence: 0.5
                 });
                 
-                // Assign the global handLandmarker to our initialized hands
-                handLandmarker = hands;
+                // Assign the global pose detector
+                poseDetector = pose;
                 
                 // Setup handler for results
-                hands.onResults((results) => {
+                pose.onResults((results) => {
                     // Clear canvas
                     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                     
-                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                        // Get the first detected hand
-                        const landmarks = results.multiHandLandmarks[0];
+                    // Draw the camera feed on the canvas
+                    canvasCtx.save();
+                    canvasCtx.drawImage(
+                        results.image, 0, 0, canvasElement.width, canvasElement.height
+                    );
+                    canvasCtx.restore();
+                    
+                    if (results.poseLandmarks) {
+                        // Store the pose landmarks for collision detection
+                        poseKeypoints = results.poseLandmarks;
+                        bodyPresent = true;
                         
-                        // Use the index finger tip (landmark 8) for control
-                        const indexTip = landmarks[8];
-                        
-                        // Convert to screen coordinates
-                        handPosition = {
-                            x: indexTip.x * canvasElement.width,
-                            y: indexTip.y * canvasElement.height
-                        };
-                        
-                        handPresent = true;
-                        handCursor.style.left = `${handPosition.x}px`;
-                        handCursor.style.top = `${handPosition.y}px`;
-                        handCursor.classList.remove('hidden');
-                        
-                        // Draw hand landmarks for visual feedback
-                        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+                        // Draw pose landmarks for visual feedback
+                        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {
                             color: '#5D5CDE',
                             lineWidth: 3
                         });
-                        drawLandmarks(canvasCtx, landmarks, {
+                        drawLandmarks(canvasCtx, results.poseLandmarks, {
                             color: '#FFFFFF',
                             lineWidth: 1,
                             radius: 3
                         });
                     } else {
-                        handPresent = false;
-                        handCursor.classList.add('hidden');
+                        bodyPresent = false;
+                        poseKeypoints = [];
                     }
                 });
                 
@@ -227,17 +250,23 @@
                 // Reset game state
                 score = 0;
                 scoreDisplay.textContent = score;
-                fallingObjects = [];
+                gameObjects = [];
                 gameTime = 0;
-                gameSpeed = 1;
+                remainingTime = gameDuration;
+                timeDisplay.textContent = remainingTime;
                 gameRunning = true;
+                
+                // Remove all existing game objects
+                while (gameContainer.firstChild) {
+                    gameContainer.removeChild(gameContainer.firstChild);
+                }
                 
                 // Set canvas dimensions
                 canvasElement.width = videoElement.videoWidth;
                 canvasElement.height = videoElement.videoHeight;
                 
-                // Start the hand tracking with camera feed
-                await handLandmarker.initialize();
+                // Start the pose detection with camera feed
+                await poseDetector.initialize();
                 
                 // Start game loop
                 lastFrameTime = performance.now();
@@ -247,28 +276,54 @@
             }
         }
         
-        // Create a falling object
-        function createFallingObject() {
-            const colors = [
-                'bg-red-500', 'bg-blue-500', 'bg-green-500', 
-                'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'
-            ];
-            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        // Create a star
+        function createStar() {
+            const star = document.createElement('div');
+            star.className = `absolute rounded-full bg-star shadow-md star`;
+            star.style.width = `${starSize}px`;
+            star.style.height = `${starSize}px`;
+            star.style.left = `${Math.random() * (gameContainer.clientWidth - starSize)}px`;
+            star.style.top = `${-starSize}px`;
             
-            const object = document.createElement('div');
-            object.className = `absolute rounded-full ${randomColor} shadow-md`;
-            object.style.width = `${objectSize}px`;
-            object.style.height = `${objectSize}px`;
-            object.style.left = `${Math.random() * (gameContainer.clientWidth - objectSize)}px`;
-            object.style.top = `${-objectSize}px`;
+            // Add star points shape
+            star.innerHTML = `
+                <svg viewBox="0 0 24 24" class="w-full h-full fill-current text-star">
+                    <path d="M12 1L15.09 7.72L22.5 8.25L17.25 13.27L18.52 20.52L12 16.77L5.48 20.52L6.75 13.27L1.5 8.25L8.91 7.72L12 1Z"/>
+                </svg>
+            `;
             
-            gameContainer.appendChild(object);
+            gameContainer.appendChild(star);
             
-            fallingObjects.push({
-                element: object,
-                y: -objectSize,
-                x: parseFloat(object.style.left),
-                caught: false
+            gameObjects.push({
+                element: star,
+                y: -starSize,
+                x: parseFloat(star.style.left),
+                width: starSize,
+                height: starSize,
+                type: 'star',
+                collected: false
+            });
+        }
+        
+        // Create an obstacle
+        function createObstacle() {
+            const obstacle = document.createElement('div');
+            obstacle.className = `absolute bg-obstacle shadow-md obstacle`;
+            obstacle.style.width = `${obstacleSize}px`;
+            obstacle.style.height = `${obstacleSize}px`;
+            obstacle.style.left = `${Math.random() * (gameContainer.clientWidth - obstacleSize)}px`;
+            obstacle.style.top = `${-obstacleSize}px`;
+            
+            gameContainer.appendChild(obstacle);
+            
+            gameObjects.push({
+                element: obstacle,
+                y: -obstacleSize,
+                x: parseFloat(obstacle.style.left),
+                width: obstacleSize,
+                height: obstacleSize,
+                type: 'obstacle',
+                collected: false
             });
         }
         
@@ -283,22 +338,28 @@
             // Update game time
             gameTime += deltaTime;
             
-            // Create new objects
-            if (gameTime % (objectFrequency / gameSpeed) < deltaTime) {
-                createFallingObject();
+            // Update remaining time
+            remainingTime = Math.max(0, gameDuration - Math.floor(gameTime));
+            timeDisplay.textContent = remainingTime;
+            
+            // Create new stars
+            if (gameTime % starFrequency < deltaTime) {
+                createStar();
             }
             
-            // Increase game speed over time
-            gameSpeed = 1 + (gameTime / 30) * 0.5;
+            // Create new obstacles
+            if (gameTime % obstacleFrequency < deltaTime) {
+                createObstacle();
+            }
             
-            // Process hand detection
-            detectHands();
+            // Process pose detection
+            detectPose();
             
-            // Update falling objects
-            updateObjects(deltaTime);
+            // Update game objects
+            updateGameObjects(deltaTime);
             
             // Check for game over condition
-            if (gameTime >= gameDuration) {
+            if (remainingTime <= 0) {
                 endGame();
                 return;
             }
@@ -306,50 +367,78 @@
             requestAnimationFrame(gameLoop);
         }
         
-        // Detect hands using MediaPipe
-        function detectHands() {
-            if (!handLandmarker || videoElement.currentTime === lastVideoTime) {
+        // Detect pose using MediaPipe
+        function detectPose() {
+            if (!poseDetector || videoElement.currentTime === lastVideoTime) {
                 return;
             }
             
             lastVideoTime = videoElement.currentTime;
             
-            // The hands API handles detection internally through its onResults callback
-            // This is set up during initialization in setupMediaPipe
-            // Just send the current frame to MediaPipe for processing
-            handLandmarker.send({image: videoElement});
+            // Send the current frame to MediaPipe for processing
+            poseDetector.send({image: videoElement});
         }
         
-        // Update falling objects
-        function updateObjects(deltaTime) {
-            fallingObjects.forEach((object, index) => {
+        // Check if a point is close to any body part
+        function isPointNearBody(x, y) {
+            if (!bodyPresent || poseKeypoints.length === 0) return false;
+            
+            // Convert normalized coordinates to pixel coordinates
+            const canvasWidth = canvasElement.width;
+            const canvasHeight = canvasElement.height;
+            
+            // Check proximity to any tracked keypoint
+            for (const keypoint of poseKeypoints) {
+                const keypointX = keypoint.x * canvasWidth;
+                const keypointY = keypoint.y * canvasHeight;
+                
+                const distance = Math.hypot(keypointX - x, keypointY - y);
+                
+                if (distance < interactionDistance) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Update game objects
+        function updateGameObjects(deltaTime) {
+            gameObjects.forEach((object, index) => {
                 // Update position
-                object.y += objectFallSpeed * gameSpeed * deltaTime;
+                object.y += objectFallSpeed * deltaTime;
                 object.element.style.top = `${object.y}px`;
                 
-                // Check if hand catches the object
-                if (handPresent && !object.caught) {
-                    const distance = Math.hypot(
-                        handPosition.x - (object.x + objectSize/2),
-                        handPosition.y - (object.y + objectSize/2)
-                    );
+                // Check for collisions with body
+                if (!object.collected) {
+                    const objCenterX = object.x + object.width / 2;
+                    const objCenterY = object.y + object.height / 2;
                     
-                    if (distance < catchDistance) {
-                        // Caught object!
-                        object.caught = true;
-                        object.element.classList.add('scale-0', 'opacity-0', 'transition-all', 'duration-300');
-                        score += 10;
-                        scoreDisplay.textContent = score;
+                    if (isPointNearBody(objCenterX, objCenterY)) {
+                        // Mark as collected to prevent multiple collisions
+                        object.collected = true;
                         
-                        // Create particle effect
-                        createCatchParticles(object.x + objectSize/2, object.y + objectSize/2);
+                        // Handle collision based on object type
+                        if (object.type === 'star') {
+                            // Collect star
+                            score += 10;
+                            object.element.classList.add('scale-0', 'opacity-0', 'transition-all', 'duration-300');
+                            createCollectEffect(objCenterX, objCenterY, 'star');
+                        } else if (object.type === 'obstacle') {
+                            // Hit obstacle
+                            score = Math.max(0, score - 5);
+                            object.element.classList.add('opacity-0', 'transition-all', 'duration-300');
+                            createCollectEffect(objCenterX, objCenterY, 'obstacle');
+                        }
+                        
+                        scoreDisplay.textContent = score;
                         
                         // Remove after animation
                         setTimeout(() => {
                             if (object.element.parentNode) {
                                 object.element.parentNode.removeChild(object.element);
                             }
-                            fallingObjects.splice(index, 1);
+                            gameObjects.splice(index, 1);
                         }, 300);
                     }
                 }
@@ -359,14 +448,17 @@
                     if (object.element.parentNode) {
                         object.element.parentNode.removeChild(object.element);
                     }
-                    fallingObjects.splice(index, 1);
+                    gameObjects.splice(index, 1);
                 }
             });
         }
         
-        // Create particle effect when catching objects
-        function createCatchParticles(x, y) {
-            const colors = ['bg-yellow-400', 'bg-white', 'bg-primary', 'bg-yellow-200'];
+        // Create effect when collecting objects
+        function createCollectEffect(x, y, type) {
+            const colors = type === 'star' 
+                ? ['bg-yellow-400', 'bg-white', 'bg-yellow-200'] 
+                : ['bg-red-500', 'bg-red-300', 'bg-red-700'];
+            
             const particleCount = 8;
             
             for (let i = 0; i < particleCount; i++) {
@@ -409,19 +501,47 @@
                 
                 requestAnimationFrame(animateParticle);
             }
+            
+            // Add score popup
+            const scorePopup = document.createElement('div');
+            scorePopup.className = `absolute text-lg font-bold text-${type === 'star' ? 'yellow' : 'red'}-500 transform -translate-x-1/2`;
+            scorePopup.style.left = `${x}px`;
+            scorePopup.style.top = `${y}px`;
+            scorePopup.textContent = type === 'star' ? '+10' : '-5';
+            
+            gameContainer.appendChild(scorePopup);
+            
+            // Animate score popup
+            let popupTime = 0;
+            const animatePopup = () => {
+                if (!scorePopup.parentNode) return;
+                
+                popupTime += 1/20;
+                
+                scorePopup.style.top = `${y - popupTime * 40}px`;
+                scorePopup.style.opacity = `${1 - popupTime}`;
+                
+                if (popupTime < 1) {
+                    requestAnimationFrame(animatePopup);
+                } else {
+                    scorePopup.parentNode.removeChild(scorePopup);
+                }
+            };
+            
+            requestAnimationFrame(animatePopup);
         }
         
         // End the game
         function endGame() {
             gameRunning = false;
             
-            // Remove falling objects
-            fallingObjects.forEach(object => {
+            // Remove game objects
+            gameObjects.forEach(object => {
                 if (object.element.parentNode) {
                     object.element.parentNode.removeChild(object.element);
                 }
             });
-            fallingObjects = [];
+            gameObjects = [];
             
             // Update final score
             finalScoreDisplay.textContent = score;
