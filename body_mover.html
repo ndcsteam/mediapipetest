@@ -1,1 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Mover - MediaPipe Pose Game</title>
+    <!-- MediaPipe dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                        star: '#FFDE59',
+                        obstacle: '#FF5757'
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes twinkle {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        .star {
+            animation: twinkle 1.5s infinite;
+        }
+        .obstacle {
+            clip-path: polygon(50% 0%, 80% 30%, 100% 50%, 80% 70%, 50% 100%, 20% 70%, 0% 50%, 20% 30%);
+        }
+    </style>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <h1 class="text-3xl font-bold text-center mb-2 text-primary">Body Mover</h1>
+        <p class="text-center mb-6">Move your body to collect stars and avoid obstacles!</p>
+        
+        <div class="relative mx-auto w-full max-w-2xl aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <!-- Camera feed (mirrored) -->
+            <video id="webcam" class="absolute top-0 left-0 w-full h-full" playsinline style="transform: scaleX(-1);"></video>
+            
+            <!-- Game canvas for pose landmarks -->
+            <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full z-10" style="transform: scaleX(-1);"></canvas>
+            
+            <!-- Game elements (also mirrored) -->
+            <div id="game-container" class="absolute top-0 left-0 w-full h-full z-20" style="transform: scaleX(-1);">
+                <!-- Game objects will be created here -->
+            </div>
+            
+            <!-- Game stats display -->
+            <div id="stats-display" class="absolute top-4 right-4 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-md z-30 flex flex-col">
+                <p class="font-bold">Score: <span id="score">0</span></p>
+                <p class="text-sm">Time: <span id="time">60</span>s</p>
+                <p class="text-sm flex items-center">
+                    <span class="inline-block w-3 h-3 bg-star rounded-full mr-1"></span> +10 points
+                </p>
+                <p class="text-sm flex items-center">
+                    <span class="inline-block w-3 h-3 bg-obstacle mr-1"></span> -5 points
+                </p>
+            </div>
+            
+            <!-- Game state overlays -->
+            <div id="loading-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40">
+                <div class="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p class="text-lg font-medium">Loading MediaPipe...</p>
+                <p class="text-sm mt-2">This game requires camera access to track your body.</p>
+            </div>
+            
+            <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <h2 class="text-2xl font-bold mb-2">Body Mover</h2>
+                <div class="max-w-md p-4 mb-4">
+                    <p class="mb-2 text-center">Move your body to interact with falling objects:</p>
+                    <ul class="list-disc pl-5 mb-4">
+                        <li>Collect stars (<span class="text-star">★</span>) with any part of your body for +10 points</li>
+                        <li>Avoid spiky obstacles (<span class="text-obstacle">✸</span>) or lose 5 points</li>
+                        <li>Stay in frame so the camera can see you</li>
+                    </ul>
+                </div>
+                <button id="start-button" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors text-lg font-medium">Start Game</button>
+            </div>
+            
+            <div id="permission-error" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <div class="text-red-500 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold mb-2">Camera Access Required</h2>
+                <p class="text-center max-w-md mb-6">This game needs access to your camera to track your body movements. Please allow camera access and reload the page.</p>
+                <button onclick="location.reload()" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors">Try Again</button>
+            </div>
+            
+            <div id="game-over" class="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-gray-900 bg-opacity-90 dark:bg-opacity-90 z-40 hidden">
+                <h2 class="text-2xl font-bold mb-2">Game Over!</h2>
+                <p class="mb-2">Your score: <span id="final-score" class="font-bold text-xl">0</span></p>
+                <button id="restart-button" class="px-6 py-3 bg-primary text-white rounded-lg shadow-md hover:bg-opacity-90 transition-colors mt-4">Play Again</button>
+            </div>
+        </div>
+        
+        <div class="mt-6 text-center">
+            <p class="text-sm opacity-80">This game uses MediaPipe's pose detection to track your body movements.</p>
+            <p class="text-sm opacity-80 mt-1">For best results, make sure your entire body is visible in the camera.</p>
+        </div>
+    </div>
 
+    <script>
+        // Set up dark mode detection
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        // Game elements
+        const loadingScreen = document.getElementById('loading-screen');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over');
+        const permissionError = document.getElementById('permission-error');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const scoreDisplay = document.getElementById('score');
+        const timeDisplay = document.getElementById('time');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const gameContainer = document.getElementById('game-container');
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        // Game state
+        let poseDetector = null;
+        let gameRunning = false;
+        let score = 0;
+        let lastVideoTime = -1;
+        let gameObjects = [];
+        let poseKeypoints = [];
+        let bodyPresent = false;
+        let lastFrameTime = 0;
+        let gameTime = 0;
+        let remainingTime = 60; // Game duration in seconds
+        
+        // Game settings
+        const gameDuration = 60; // in seconds
+        const starFrequency = 1.0; // new star every X seconds
+        const obstacleFrequency = 1.8; // new obstacle every X seconds
+        const objectFallSpeed = 150; // pixels per second
+        const starSize = 40;
+        const obstacleSize = 35;
+        const interactionDistance = 30; // Distance for collision detection
+        
+        // Start loading MediaPipe
+        async function setupMediaPipe() {
+            try {
+                // Initialize Pose detection
+                const pose = new Pose({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+                    }
+                });
+                
+                pose.setOptions({
+                    modelComplexity: 1,
+                    smoothLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                
+                // Assign the global pose detector
+                poseDetector = pose;
+                
+                // Setup handler for results
+                pose.onResults((results) => {
+                    // Clear canvas
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    
+                    // Draw the camera feed on the canvas
+                    canvasCtx.save();
+                    canvasCtx.drawImage(
+                        results.image, 0, 0, canvasElement.width, canvasElement.height
+                    );
+                    canvasCtx.restore();
+                    
+                    if (results.poseLandmarks) {
+                        // Store the pose landmarks for collision detection
+                        poseKeypoints = results.poseLandmarks;
+                        bodyPresent = true;
+                        
+                        // Draw pose landmarks for visual feedback
+                        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {
+                            color: '#5D5CDE',
+                            lineWidth: 3
+                        });
+                        drawLandmarks(canvasCtx, results.poseLandmarks, {
+                            color: '#FFFFFF',
+                            lineWidth: 1,
+                            radius: 3
+                        });
+                    } else {
+                        bodyPresent = false;
+                        poseKeypoints = [];
+                    }
+                });
+                
+                // Show start screen once loaded
+                loadingScreen.classList.add('hidden');
+                startScreen.classList.remove('hidden');
+            } catch (error) {
+                console.error("Error loading MediaPipe:", error);
+                loadingScreen.classList.add('hidden');
+                permissionError.classList.remove('hidden');
+            }
+        }
+        
+        // Try to setup camera access
+        async function setupCamera() {
+            try {
+                const constraints = { video: { width: 1280, height: 720 } };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        resolve(videoElement);
+                    };
+                });
+            } catch (error) {
+                console.error("Error accessing camera:", error);
+                loadingScreen.classList.add('hidden');
+                permissionError.classList.remove('hidden');
+                throw error;
+            }
+        }
+        
+        // Start the game
+        async function startGame() {
+            try {
+                const camera = await setupCamera();
+                startScreen.classList.add('hidden');
+                
+                // Reset game state
+                score = 0;
+                scoreDisplay.textContent = score;
+                gameObjects = [];
+                gameTime = 0;
+                remainingTime = gameDuration;
+                timeDisplay.textContent = remainingTime;
+                gameRunning = true;
+                
+                // Remove all existing game objects
+                while (gameContainer.firstChild) {
+                    gameContainer.removeChild(gameContainer.firstChild);
+                }
+                
+                // Set canvas dimensions
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+                
+                // Start the pose detection with camera feed
+                await poseDetector.initialize();
+                
+                // Start game loop
+                lastFrameTime = performance.now();
+                requestAnimationFrame(gameLoop);
+            } catch (error) {
+                console.error("Error starting game:", error);
+            }
+        }
+        
+        // Create a star
+        function createStar() {
+            const star = document.createElement('div');
+            star.className = `absolute rounded-full bg-star shadow-md star`;
+            star.style.width = `${starSize}px`;
+            star.style.height = `${starSize}px`;
+            star.style.left = `${Math.random() * (gameContainer.clientWidth - starSize)}px`;
+            star.style.top = `${-starSize}px`;
+            
+            // Add star points shape
+            star.innerHTML = `
+                <svg viewBox="0 0 24 24" class="w-full h-full fill-current text-star">
+                    <path d="M12 1L15.09 7.72L22.5 8.25L17.25 13.27L18.52 20.52L12 16.77L5.48 20.52L6.75 13.27L1.5 8.25L8.91 7.72L12 1Z"/>
+                </svg>
+            `;
+            
+            gameContainer.appendChild(star);
+            
+            gameObjects.push({
+                element: star,
+                y: -starSize,
+                x: parseFloat(star.style.left),
+                width: starSize,
+                height: starSize,
+                type: 'star',
+                collected: false
+            });
+        }
+        
+        // Create an obstacle
+        function createObstacle() {
+            const obstacle = document.createElement('div');
+            obstacle.className = `absolute bg-obstacle shadow-md obstacle`;
+            obstacle.style.width = `${obstacleSize}px`;
+            obstacle.style.height = `${obstacleSize}px`;
+            obstacle.style.left = `${Math.random() * (gameContainer.clientWidth - obstacleSize)}px`;
+            obstacle.style.top = `${-obstacleSize}px`;
+            
+            gameContainer.appendChild(obstacle);
+            
+            gameObjects.push({
+                element: obstacle,
+                y: -obstacleSize,
+                x: parseFloat(obstacle.style.left),
+                width: obstacleSize,
+                height: obstacleSize,
+                type: 'obstacle',
+                collected: false
+            });
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+            
+            // Calculate time delta
+            const deltaTime = (timestamp - lastFrameTime) / 1000;
+            lastFrameTime = timestamp;
+            
+            // Update game time
+            gameTime += deltaTime;
+            
+            // Update remaining time
+            remainingTime = Math.max(0, gameDuration - Math.floor(gameTime));
+            timeDisplay.textContent = remainingTime;
+            
+            // Create new stars
+            if (gameTime % starFrequency < deltaTime) {
+                createStar();
+            }
+            
+            // Create new obstacles
+            if (gameTime % obstacleFrequency < deltaTime) {
+                createObstacle();
+            }
+            
+            // Process pose detection
+            detectPose();
+            
+            // Update game objects
+            updateGameObjects(deltaTime);
+            
+            // Check for game over condition
+            if (remainingTime <= 0) {
+                endGame();
+                return;
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Detect pose using MediaPipe
+        function detectPose() {
+            if (!poseDetector || videoElement.currentTime === lastVideoTime) {
+                return;
+            }
+            
+            lastVideoTime = videoElement.currentTime;
+            
+            // Send the current frame to MediaPipe for processing
+            poseDetector.send({image: videoElement});
+        }
+        
+        // Check if a point is close to any body part
+        function isPointNearBody(x, y) {
+            if (!bodyPresent || poseKeypoints.length === 0) return false;
+            
+            // Convert normalized coordinates to pixel coordinates
+            const canvasWidth = canvasElement.width;
+            const canvasHeight = canvasElement.height;
+            
+            // Check proximity to any tracked keypoint
+            for (const keypoint of poseKeypoints) {
+                const keypointX = keypoint.x * canvasWidth;
+                const keypointY = keypoint.y * canvasHeight;
+                
+                const distance = Math.hypot(keypointX - x, keypointY - y);
+                
+                if (distance < interactionDistance) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Update game objects
+        function updateGameObjects(deltaTime) {
+            gameObjects.forEach((object, index) => {
+                // Update position
+                object.y += objectFallSpeed * deltaTime;
+                object.element.style.top = `${object.y}px`;
+                
+                // Check for collisions with body
+                if (!object.collected) {
+                    const objCenterX = object.x + object.width / 2;
+                    const objCenterY = object.y + object.height / 2;
+                    
+                    if (isPointNearBody(objCenterX, objCenterY)) {
+                        // Mark as collected to prevent multiple collisions
+                        object.collected = true;
+                        
+                        // Handle collision based on object type
+                        if (object.type === 'star') {
+                            // Collect star
+                            score += 10;
+                            object.element.classList.add('scale-0', 'opacity-0', 'transition-all', 'duration-300');
+                            createCollectEffect(objCenterX, objCenterY, 'star');
+                        } else if (object.type === 'obstacle') {
+                            // Hit obstacle
+                            score = Math.max(0, score - 5);
+                            object.element.classList.add('opacity-0', 'transition-all', 'duration-300');
+                            createCollectEffect(objCenterX, objCenterY, 'obstacle');
+                        }
+                        
+                        scoreDisplay.textContent = score;
+                        
+                        // Remove after animation
+                        setTimeout(() => {
+                            if (object.element.parentNode) {
+                                object.element.parentNode.removeChild(object.element);
+                            }
+                            gameObjects.splice(index, 1);
+                        }, 300);
+                    }
+                }
+                
+                // Remove if out of bounds
+                if (object.y > gameContainer.clientHeight) {
+                    if (object.element.parentNode) {
+                        object.element.parentNode.removeChild(object.element);
+                    }
+                    gameObjects.splice(index, 1);
+                }
+            });
+        }
+        
+        // Create effect when collecting objects
+        function createCollectEffect(x, y, type) {
+            const colors = type === 'star' 
+                ? ['bg-yellow-400', 'bg-white', 'bg-yellow-200'] 
+                : ['bg-red-500', 'bg-red-300', 'bg-red-700'];
+            
+            const particleCount = 8;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = `absolute ${colors[i % colors.length]} rounded-full opacity-80`;
+                
+                const size = Math.random() * 8 + 4;
+                particle.style.width = `${size}px`;
+                particle.style.height = `${size}px`;
+                particle.style.left = `${x}px`;
+                particle.style.top = `${y}px`;
+                
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 100 + 50;
+                const vx = Math.cos(angle) * speed;
+                const vy = Math.sin(angle) * speed;
+                
+                gameContainer.appendChild(particle);
+                
+                // Animate particles
+                let particleTime = 0;
+                const animateParticle = (timestamp) => {
+                    if (!particle.parentNode) return;
+                    
+                    particleTime += 1/60;
+                    
+                    const newX = x + vx * particleTime;
+                    const newY = y + vy * particleTime + (50 * particleTime * particleTime);
+                    
+                    particle.style.left = `${newX}px`;
+                    particle.style.top = `${newY}px`;
+                    particle.style.opacity = `${1 - particleTime * 2}`;
+                    
+                    if (particleTime < 0.5) {
+                        requestAnimationFrame(animateParticle);
+                    } else {
+                        particle.parentNode.removeChild(particle);
+                    }
+                };
+                
+                requestAnimationFrame(animateParticle);
+            }
+            
+            // Add score popup
+            const scorePopup = document.createElement('div');
+            scorePopup.className = `absolute text-lg font-bold text-${type === 'star' ? 'yellow' : 'red'}-500 transform -translate-x-1/2`;
+            scorePopup.style.left = `${x}px`;
+            scorePopup.style.top = `${y}px`;
+            scorePopup.textContent = type === 'star' ? '+10' : '-5';
+            
+            gameContainer.appendChild(scorePopup);
+            
+            // Animate score popup
+            let popupTime = 0;
+            const animatePopup = () => {
+                if (!scorePopup.parentNode) return;
+                
+                popupTime += 1/20;
+                
+                scorePopup.style.top = `${y - popupTime * 40}px`;
+                scorePopup.style.opacity = `${1 - popupTime}`;
+                
+                if (popupTime < 1) {
+                    requestAnimationFrame(animatePopup);
+                } else {
+                    scorePopup.parentNode.removeChild(scorePopup);
+                }
+            };
+            
+            requestAnimationFrame(animatePopup);
+        }
+        
+        // End the game
+        function endGame() {
+            gameRunning = false;
+            
+            // Remove game objects
+            gameObjects.forEach(object => {
+                if (object.element.parentNode) {
+                    object.element.parentNode.removeChild(object.element);
+                }
+            });
+            gameObjects = [];
+            
+            // Update final score
+            finalScoreDisplay.textContent = score;
+            
+            // Show game over screen
+            gameOverScreen.classList.remove('hidden');
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            startGame();
+        });
+        
+        // Start loading MediaPipe on page load
+        window.addEventListener('load', setupMediaPipe);
+    </script>
+</body>
+</html>
