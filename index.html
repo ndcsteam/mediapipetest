@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediaPipe Hand Tracking Game</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1651854615"></script>
+    <!-- MediaPipe dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -129,17 +131,60 @@
         // Start loading MediaPipe
         async function setupMediaPipe() {
             try {
-                const vision = await FilesetResolver.forVisionTasks(
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-                );
+                // Initialize Hands detector
+                const hands = new Hands({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    }
+                });
                 
-                handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                    baseOptions: {
-                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                        delegate: "GPU"
-                    },
-                    runningMode: "VIDEO",
-                    numHands: 1
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                
+                // Assign the global handLandmarker to our initialized hands
+                handLandmarker = hands;
+                
+                // Setup handler for results
+                hands.onResults((results) => {
+                    // Clear canvas
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        // Get the first detected hand
+                        const landmarks = results.multiHandLandmarks[0];
+                        
+                        // Use the index finger tip (landmark 8) for control
+                        const indexTip = landmarks[8];
+                        
+                        // Convert to screen coordinates
+                        handPosition = {
+                            x: indexTip.x * canvasElement.width,
+                            y: indexTip.y * canvasElement.height
+                        };
+                        
+                        handPresent = true;
+                        handCursor.style.left = `${handPosition.x}px`;
+                        handCursor.style.top = `${handPosition.y}px`;
+                        handCursor.classList.remove('hidden');
+                        
+                        // Draw hand landmarks for visual feedback
+                        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+                            color: '#5D5CDE',
+                            lineWidth: 3
+                        });
+                        drawLandmarks(canvasCtx, landmarks, {
+                            color: '#FFFFFF',
+                            lineWidth: 1,
+                            radius: 3
+                        });
+                    } else {
+                        handPresent = false;
+                        handCursor.classList.add('hidden');
+                    }
                 });
                 
                 // Show start screen once loaded
@@ -176,7 +221,7 @@
         // Start the game
         async function startGame() {
             try {
-                await setupCamera();
+                const camera = await setupCamera();
                 startScreen.classList.add('hidden');
                 
                 // Reset game state
@@ -190,6 +235,9 @@
                 // Set canvas dimensions
                 canvasElement.width = videoElement.videoWidth;
                 canvasElement.height = videoElement.videoHeight;
+                
+                // Start the hand tracking with camera feed
+                await handLandmarker.initialize();
                 
                 // Start game loop
                 lastFrameTime = performance.now();
@@ -266,43 +314,10 @@
             
             lastVideoTime = videoElement.currentTime;
             
-            const results = handLandmarker.detectForVideo(videoElement, performance.now());
-            
-            // Clear canvas
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            
-            if (results.landmarks.length > 0) {
-                // Get palm position (average of specific landmarks)
-                const landmarks = results.landmarks[0];
-                
-                // Use the index finger tip (landmark 8) for control
-                const indexTip = landmarks[8];
-                
-                // Convert to screen coordinates
-                handPosition = {
-                    x: indexTip.x * canvasElement.width,
-                    y: indexTip.y * canvasElement.height
-                };
-                
-                handPresent = true;
-                handCursor.style.left = `${handPosition.x}px`;
-                handCursor.style.top = `${handPosition.y}px`;
-                handCursor.classList.remove('hidden');
-                
-                // Draw hand landmarks for visual feedback
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
-                    color: '#5D5CDE',
-                    lineWidth: 3
-                });
-                drawLandmarks(canvasCtx, landmarks, {
-                    color: '#FFFFFF',
-                    lineWidth: 1,
-                    radius: 3
-                });
-            } else {
-                handPresent = false;
-                handCursor.classList.add('hidden');
-            }
+            // The hands API handles detection internally through its onResults callback
+            // This is set up during initialization in setupMediaPipe
+            // Just send the current frame to MediaPipe for processing
+            handLandmarker.send({image: videoElement});
         }
         
         // Update falling objects
